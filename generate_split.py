@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import json
 
 np.random.seed(2020) # to ensure you always get the same train/test split
 
@@ -35,16 +36,43 @@ np.save(os.path.join(split_path,'file_names_train.npy'),file_names_train)
 np.save(os.path.join(split_path,'file_names_test.npy'),file_names_test)
 
 if split_test:
-    with open(os.path.join(gts_path, 'annotations.json'),'r') as f:
+    # mturk
+    with open(os.path.join(gts_path, 'formatted_annotations_students.json'),'r') as f:
         gts = json.load(f)
 
     # Use file_names_train and file_names_test to apply the split to the
     # annotations
     gts_train = {}
     gts_test = {}
-    '''
-    Your code below.
-    '''
+
+    for fn in file_names_train:
+        gts_train[fn] = gts[fn]
+
+    for fn in file_names_test:
+        gts_test[fn] = gts[fn]
+
+    # annotations_total = np.sum([len(gts[fn]) for fn in gts])
+    # annotations_train = int(train_frac * annotations_total)
+    # inds_ann = list(range(annotations_total))
+    # np.random.shuffle(inds_ann)
+    #
+    # ind_curr = 0
+    # for file_name in gts:
+    #     for box in gts[file_name]:
+    #         if inds_ann[ind_curr] < annotations_train:
+    #             print(ind_curr)
+    #             # Check if entry exists.
+    #             if gts_train.get(file_name) == None:
+    #                 gts_train[file_name] = [box]
+    #             else:
+    #                 gts_train[file_name].append(box)
+    #         else:
+    #             # Check if entry exists.
+    #             if gts_test.get(file_name) == None:
+    #                 gts_test[file_name] = [box]
+    #             else:
+    #                 gts_test[file_name].append(box)
+    #         ind_curr += 1
 
     with open(os.path.join(gts_path, 'annotations_train.json'),'w') as f:
         json.dump(gts_train,f)
