@@ -22,15 +22,15 @@ def main():
     split_path = '../data/hw02_splits'
     file_names_train = np.load(os.path.join(split_path,'file_names_train.npy'))
     file_names_test = np.load(os.path.join(split_path,'file_names_test.npy'))
-    file_names = file_names_train
+
+    # Set whether visualizing test or train.
+    file_names = file_names_test
 
     # get predictions
-    # with open(os.path.join(preds_path,'preds.json')) as f:
-    with open(os.path.join(preds_path, 'preds_train.json')) as f:
+    with open(os.path.join(preds_path,'preds_test.json')) as f:
         bounding_boxes = json.load(f)
 
-    # for i in range(len(file_names)):
-    for i in range(20,30):
+    for i in range(len(file_names)):
         # read image using PIL:
         I = Image.open(os.path.join(data_path,file_names[i]))
         # draw box and save

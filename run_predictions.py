@@ -1,22 +1,24 @@
 import os
 import numpy as np
 import json
-from PIL import Image
+import matplotlib.pyplot as plt
+from PIL import Image, ImageFilter
 
-THRESHOLD_SQ = 0.93
-THRESHOLD_RECT = 0.9
+THRESHOLD_SQ = 0.9
+THRESHOLD_RECT = 0.8
 
 def find_red_light_info(red_light, mult):
-    # convert to numpy array
+    # Convert to array.
     red_light_arr = np.asarray(red_light)
     (height, width, n_chanels) = np.shape(red_light_arr)
 
-    # flatten
+    # Flatten.
     red_light_flat = np.reshape(red_light_arr, np.size(red_light_arr))
 
     # (left, top, right, down) distance from center to each edge
     center = [4, 4, 4, 4]
-    # adjust accordingly to resize
+
+    # Adjust accordingly to resize.
     center = [int(mult*x) for x in center]
     center[2] = width - center[0]
     center[3] = height - center[1]
@@ -29,17 +31,17 @@ def find_red_light_info(red_light, mult):
 def find_target_red_lights():
     red_light_lst = [] # list of red lights of different sizes
     # Open file to get target red light.
-    fn = 'RL-001.jpg'
+    fn = 'RL-002.jpg'
     img = Image.open(os.path.join(data_path, fn))
 
     # Find square red light.
-    (left, top, right, bottom) = (316, 154, 323, 162)
+    (left, top, right, bottom) = (401, 224, 409, 232)
     (width, height) = (right-left, bottom-top)
     red_light = img.crop((left, top, right, bottom))
     red_light.save('red_light.jpg')
 
     # Find full traffic light (rectangle).
-    (left_rec, top_rec, right_rec, bottom_rec) = (316, 154, 323, 172)
+    (left_rec, top_rec, right_rec, bottom_rec) = (401, 224, 409, 243)
     (width_rec, height_rec) = (right_rec-left_rec, bottom_rec-top_rec)
     red_light_rec = img.crop((left_rec, top_rec, right_rec, bottom_rec))
     red_light_rec.save('red_light_rec.jpg')
@@ -63,7 +65,7 @@ def find_target_red_lights():
         print('m', m, ',Sq:', red_light_img.size, 'Rec:', red_light_img_rec.size)
     return red_light_lst
 
-def compute_convolution_grid(heatmap, row, col, I, T_width, T_flat, T_norm, T_center, threshold):
+def compute_convolution_grid(row, col, I, T_width, T_flat, T_norm, T_center, threshold):
     (n_rows,n_cols,n_channels) = np.shape(I)
 
     # Extract template info.
@@ -86,13 +88,12 @@ def compute_convolution_grid(heatmap, row, col, I, T_width, T_flat, T_norm, T_ce
         # Find inner product and divide by product of norms.
         comp_val = np.dot(T_flat, I_box_flat) / (T_norm * I_box_norm)
 
-        # If value meets threshold, return value and bounding box.
-        if comp_val > threshold and comp_val > heatmap[row,col,0]:
-            heatmap[row,col,0] = comp_val
-            heatmap[row,col,1] = T_width
-    return heatmap
+        # If value meets threshold, return value.
+        if comp_val > threshold:
+            return comp_val
+    return None
 
-def compute_convolution(I, T, T_center, inds, heatmap, threshold=0.9, stride=None):
+def compute_convolution(I, T, T_center, T_rect, T_center_rect, heatmap, stride=None):
     '''
     This function takes an image <I> and a template <T> (both numpy arrays)
     and returns a heatmap where each grid represents the output produced by
@@ -101,28 +102,33 @@ def compute_convolution(I, T, T_center, inds, heatmap, threshold=0.9, stride=Non
     '''
     (n_rows,n_cols,n_channels) = np.shape(I)
 
-    # Find properties of template.
+    # Find properties of templates.
     (T_height,T_width,info) = np.shape(T)
     T_flat = np.reshape(T, np.size(T))
     T_norm = np.linalg.norm(T_flat)
 
-    '''
-    BEGIN YOUR CODE
-    '''
+    (T_height_rect,T_width_rect,info) = np.shape(T_rect)
+    T_flat_rect = np.reshape(T_rect, np.size(T_rect))
+    T_norm_rect = np.linalg.norm(T_flat_rect)
 
-    for [r,c] in inds:
-        heatmap = compute_convolution_grid(heatmap, r, c, I, T_width, T_flat, T_norm, T_center, threshold)
+    # Find all bright pixels.
+    light_inds = np.argwhere(I[:n_rows//2,:,0] > 200)
 
-    '''
-    END YOUR CODE
-    '''
-
+    for [r,c] in light_inds:
+        # Use the rectangular template.
+        sim = compute_convolution_grid(r, c, I, T_width_rect, T_flat_rect, T_norm_rect, T_center_rect, THRESHOLD_RECT)
+        if sim != None:
+            # Use the square template.
+            comp_val = compute_convolution_grid(r, c, I, T_width, T_flat, T_norm, T_center, THRESHOLD_SQ)
+            # Update heatmap.
+            if comp_val != None and comp_val > heatmap[r,c,0]:
+                heatmap[r,c,0] = comp_val
+                heatmap[r,c,1] = T_width
     return heatmap
 
 def check_overlap(box1, box2):
     [tl_row1, tl_col1, br_row1, br_col1] = box1
     [tl_row2, tl_col2, br_row2, br_col2] = box2
-    # check if share side
 
     if (tl_col1 >= tl_col2 and tl_col1 <= br_col2 \
       and tl_row1 >= tl_row2 and tl_row1 <= br_row2) \
@@ -136,14 +142,12 @@ def check_overlap(box1, box2):
     else:
         return False
 
-
-
 def remove_overlaps(box, output):
     coords = box[0:4]
     score = box[4]
-    # Iterate over all boxes currently in output.
 
     is_max = True
+    # Iterate over all boxes currently in output.
     k = 0
     while k < len(output):
         coords1 = output[k][0:4]
@@ -154,29 +158,26 @@ def remove_overlaps(box, output):
             if score >= score1:
                 output.pop(k)
             else:
-                # could also just return after appending this to end
                 is_max = False
                 break
         else:
             k += 1
+    # Add to output if larger in value than any overlapping boxes.
     if is_max:
         output.append(box)
     return output
 
-    # Convert list of tuples (inds, val) to just list of inds.
-    bounding_boxes = [inds for (inds, fit) in boxes]
-    return bounding_boxes
-
 def make_gradient_box(size, range_min=0.5, range_max=1.):
-    # always odd
-    # range from 0.6 to 1
     assert(size % 2 == 1)
+
+    # Find number of levels in box.
     levels = 1 + int(size / 8)
     if levels == 1:
         levels_incr = 0
     else:
         levels_incr = (range_max - range_min) / (levels - 1)
 
+    # Create gradient in box with zeros at border.
     box = np.zeros((size, size))
     center = int(size // 2)
     for rad in range(levels):
@@ -192,38 +193,36 @@ def predict_boxes(heatmap):
     This function takes heatmap and returns the bounding boxes and associated
     confidence scores.
     '''
-
     output = []
-
-    '''
-    BEGIN YOUR CODE
-    '''
-
-    '''
-    As an example, here's code that generates between 1 and 5 random boxes
-    of fixed size and returns the results in the proper format.
-    '''
     (height, width, info) = np.shape(heatmap)
+
     for r in range(height):
         for c in range(width):
+            # Only look at nonzero pixels.
             if heatmap[r,c,0] > 0:
                 box_size_half = int(heatmap[r,c,1] / 2)
-                [tl_row, tl_col, br_row, br_col] = [r - box_size_half, c - box_size_half, r + box_size_half, c + box_size_half]
+
+                # Define bounding box.
+                tl_row = r - box_size_half
+                tl_col = c - box_size_half
+                br_row = r + box_size_half
+                br_col = c + box_size_half
+
+                # Check if within bounds of image.
                 if tl_row > 0 and tl_col > 0 and br_row < height and br_col < width:
+                    # Calculate score.
                     grad_box = make_gradient_box(box_size_half * 2 + 1)
-                    score = np.sum((np.multiply(grad_box, heatmap[tl_row:br_row+1,tl_col:br_col+1,0])) / np.sum(grad_box))
-                    print(score)
+                    heatmap_box_prod = np.multiply(grad_box, heatmap[tl_row:br_row+1,tl_col:br_col+1,0])
+                    score = np.sum(heatmap_box_prod) / np.sum(grad_box)
+                    if score > 1.:
+                        score = 1.
+                    elif score < 0.:
+                        print('ERROR: predict_boxes: score')
+                    # Add box without overlaps.
                     output = remove_overlaps([tl_row, tl_col, br_row, br_col, score], output)
-
-        # output.append([tl_row,tl_col,br_row,br_col, score])
-
-    '''
-    END YOUR CODE
-    '''
-
     return output
 
-def detect_red_light_mf(I, T_lst):
+def detect_red_light_mf(I, T_lst, is_bad=False):
     '''
     This function takes a numpy array <I> and returns a list <output>.
     The length of <output> is the number of bounding boxes predicted for <I>.
@@ -239,48 +238,31 @@ def detect_red_light_mf(I, T_lst):
     I[:,:,2] is the blue channel
     '''
 
-    '''
-    BEGIN YOUR CODE
-    '''
-
     (n_rows,n_cols,n_channels) = np.shape(I)
     heatmap = np.zeros((n_rows,n_cols,2))
 
-    # heatmap_prev = np.zeros((n_rows,n_cols,2))
-    # # Prioritize very bright pixels (focus on red).
-    # heatmap_prev[I[:,:,0] > 200,0] = 1
-    # # Ignore bottom half of picture.
-    # heatmap_prev[n_rows//2:,:,0] = 0
-    light_inds = np.argwhere(I[:n_rows//2,:,0] > 200)
+    # Check whether we should do weakened algorithm.
+    if is_bad:
+        T = T_lst[4]
+        heatmap = compute_convolution(I, T['sq']['img'], T['sq']['center'],
+                                         T['rec']['img'], T['rec']['center'], heatmap)
+    else:
+        for T in T_lst:
+            heatmap = compute_convolution(I, T['sq']['img'], T['sq']['center'],
+                                             T['rec']['img'], T['rec']['center'], heatmap)
 
-    for T in T_lst:
-        # Find possible locations where the light could be.
-        heatmap_rect = compute_convolution(I, T['rec']['img'], T['rec']['center'], light_inds, heatmap, THRESHOLD_RECT)
-        # Confirm where the traffic lights are.
-        heatmap = compute_convolution(I, T['sq']['img'], T['sq']['center'], np.argwhere(heatmap_rect[:,:,0] > 0), heatmap_rect, THRESHOLD_SQ)
-
-
-        # Find the maximum of this heatmap and the previous.
-        # heatmap = np.zeros((n_rows,n_cols,2))
-        # heatmap[:,:,0] = np.maximum(heatmap0[:,:,0], heatmap_sq[:,:,0])
-        # print(np.sum(heatmap_sq))
-        # print(np.sum(heatmap0))
-        # # Track which grids were updated.
-        # updated_inds = np.argwhere(heatmap0[:,:,0] != heatmap[:,:,0])
-        # print(updated_inds)
-        # heatmap[heatmap0[:,:,0] != heatmap[:,:,0],1] = np.shape(T['sq']['img'])[0]
-
+    # Find bounding boxes.
     output = predict_boxes(heatmap)
-
-    '''
-    END YOUR CODE
-    '''
 
     for i in range(len(output)):
         assert len(output[i]) == 5
         assert (output[i][4] >= 0.0) and (output[i][4] <= 1.0)
-
     return output
+
+def plot_heatmap(heatmap):
+    plt.imshow(heatmap)
+    plt.colorbar()
+    plt.show()
 
 # Note that you are not allowed to use test data for training.
 # set the path to the downloaded data:
@@ -296,15 +278,16 @@ preds_path = '../data/hw02_preds'
 os.makedirs(preds_path, exist_ok=True) # create directory if needed
 
 # Set this parameter to True when you're done with algorithm development:
-done_tweaking = False
+done_tweaking = True
+
+# Find templates
+T_lst = find_target_red_lights()
 
 '''
 Make predictions on the training set.
 '''
 preds_train = {}
-T_lst = find_target_red_lights()
-# for i in range(len(file_names_train)):
-for i in range(20,30):
+for i in range(len(file_names_train)):
     print(file_names_train[i])
 
     # read image using PIL:
@@ -313,7 +296,7 @@ for i in range(20,30):
     # convert to numpy array:
     I = np.asarray(I)
 
-    preds_train[file_names_train[i]] = detect_red_light_mf(I, T_lst)
+    preds_train[file_names_train[i]] = detect_red_light_mf(I, T_lst, is_bad=False)
 
 # save preds (overwrites any previous predictions!)
 with open(os.path.join(preds_path,'preds_train.json'),'w') as f:
@@ -332,7 +315,7 @@ if done_tweaking:
         # convert to numpy array:
         I = np.asarray(I)
 
-        preds_test[file_names_test[i]] = detect_red_light_mf(I, T_lst)
+        preds_test[file_names_test[i]] = detect_red_light_mf(I, T_lst, is_bad=False)
 
     # save preds (overwrites any previous predictions!)
     with open(os.path.join(preds_path,'preds_test.json'),'w') as f:
